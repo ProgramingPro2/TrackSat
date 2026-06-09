@@ -4,10 +4,13 @@ import type { SatelliteRecord } from '../services/propagation';
 import { useOverhead } from '../hooks/useOverhead';
 import { useUpcomingPasses } from '../hooks/useUpcomingPasses';
 import { OverheadList } from './OverheadList';
-import { SkyPlot, overheadToSkyPoints } from './SkyPlot';
+import { SkyPlot, overheadToSkyPoints, type SkyPlotSatelliteTrack } from './SkyPlot';
 import { UpcomingPasses } from './UpcomingPasses';
 import { AimingPanel } from './AimingPanel';
 import { predictPasses } from '../services/passes';
+import { computeVisibleSkyTrack } from '../services/observation';
+import { isStationarySatellite } from '../services/propagation';
+import { colorForNoradId } from '../utils/satelliteColors';
 
 interface SkyViewProps {
   satellites: SatelliteSummary[];
@@ -32,7 +35,7 @@ export function SkyView({
   const [passMinElevation, setPassMinElevation] = useState(10);
 
   const overhead = useOverhead(records, observer, now, minElevation);
-  const { passes, computing, error } = useUpcomingPasses(satellites, observer, {
+  const { passes, computing, progress, error } = useUpcomingPasses(satellites, observer, {
     minElevationDeg: passMinElevation,
     hours: 12,
     maxResults: 50,
@@ -47,6 +50,30 @@ export function SkyView({
     () => overheadToSkyPoints(overhead, nameMap, selectedNoradId),
     [overhead, nameMap, selectedNoradId],
   );
+
+  const trackTimeBucket = Math.floor(now.getTime() / 30_000);
+
+  const skyTracks = useMemo((): SkyPlotSatelliteTrack[] => {
+    const trackDate = new Date(trackTimeBucket * 30_000);
+    const tracks: SkyPlotSatelliteTrack[] = [];
+
+    for (const sat of overhead) {
+      const record = getRecord(sat.noradId);
+      if (!record || isStationarySatellite(record.satrec, trackDate)) continue;
+
+      const points = computeVisibleSkyTrack(record.satrec, observer, trackDate);
+      if (points.length < 2) continue;
+
+      tracks.push({
+        noradId: sat.noradId,
+        color: colorForNoradId(sat.noradId),
+        points,
+        selected: sat.noradId === selectedNoradId,
+      });
+    }
+
+    return tracks;
+  }, [overhead, getRecord, observer, trackTimeBucket, selectedNoradId]);
 
   const selectedPasses = useMemo(() => {
     if (!selectedNoradId) return [];
@@ -104,7 +131,7 @@ export function SkyView({
         </div>
 
         <div className="mx-auto w-full max-w-[220px] sm:max-w-[260px] lg:max-w-[280px]">
-          <SkyPlot size={280} points={skyPoints} onSelect={onSelect} />
+          <SkyPlot size={280} points={skyPoints} tracks={skyTracks} onSelect={onSelect} />
         </div>
 
         {selectedNoradId && selectedName && (
@@ -152,6 +179,7 @@ export function SkyView({
           passes={passes}
           satellites={satellites}
           computing={computing}
+          progress={progress}
           error={error}
           now={now}
           onSelect={onSelect}

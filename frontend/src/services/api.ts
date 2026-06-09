@@ -12,11 +12,13 @@ export async function fetchCatalog(params?: {
   group?: string;
   hasRadio?: boolean;
   search?: string;
+  bands?: string[];
 }) {
   const query = new URLSearchParams();
   if (params?.group) query.set('group', params.group);
   if (params?.hasRadio) query.set('hasRadio', 'true');
   if (params?.search) query.set('search', params.search);
+  if (params?.bands?.length) query.set('bands', params.bands.join(','));
   const qs = query.toString();
   return fetchJson<import('../types').CatalogResponse>(
     `/api/satellites${qs ? `?${qs}` : ''}`,

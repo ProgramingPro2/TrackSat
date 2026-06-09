@@ -5,6 +5,7 @@ import type {
   TransmitterInfo,
 } from '../utils/types.js';
 import type { CelestrakOmm, SatnogsTransmitter } from '../utils/types.js';
+import { satelliteMatchesBands } from '../utils/frequencyBands.js';
 import { ommToKeplerian, ommToTleLines, formatFrequencyRange, normalizeNoradId } from '../utils/tle.js';
 import type { GroupFetchResult } from './celestrak.js';
 import { fetchAllGroups } from './celestrak.js';
@@ -128,6 +129,7 @@ export function filterSatellites(
     group?: string;
     hasRadio?: boolean;
     search?: string;
+    bands?: string[];
   },
 ): SatelliteDetail[] {
   let result = satellites;
@@ -138,6 +140,10 @@ export function filterSatellites(
 
   if (options.hasRadio === true) {
     result = result.filter((s) => s.hasRadio);
+  }
+
+  if (options.bands && options.bands.length > 0) {
+    result = result.filter((s) => satelliteMatchesBands(s.transmitters, options.bands!));
   }
 
   if (options.search) {

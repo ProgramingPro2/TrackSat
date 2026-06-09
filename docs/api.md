@@ -17,6 +17,7 @@ Query parameters:
 - `group` - filter by CelesTrak group (e.g. `amateur`)
 - `hasRadio=true` - only satellites with SatNOGS transmitter data
 - `search` - search by name, NORAD ID, or frequency summary
+- `bands` - comma-separated ham radio bands (`vhf`, `uhf`); matches satellites with uplink or downlink in that range
 
 ## GET /api/satellites/:noradId
 

@@ -25,6 +25,7 @@ export function useCatalog(filters: FilterState) {
         group: filters.group || undefined,
         hasRadio: filters.hasRadioOnly || undefined,
         search: filters.search || undefined,
+        bands: filters.bands.length > 0 ? filters.bands : undefined,
       });
 
       setSatellites(catalog.satellites);
@@ -34,7 +35,7 @@ export function useCatalog(filters: FilterState) {
     } finally {
       setLoading(false);
     }
-  }, [filters.group, filters.hasRadioOnly, filters.search]);
+  }, [filters.bands, filters.group, filters.hasRadioOnly, filters.search]);
 
   useEffect(() => {
     void load();

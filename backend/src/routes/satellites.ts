@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { catalogCache } from '../services/cache.js';
 import { filterSatellites, toSummary } from '../services/catalog.js';
+import { parseBandIds } from '../utils/frequencyBands.js';
 
 const router = Router();
 
@@ -12,6 +13,10 @@ const listQuerySchema = z.object({
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
   search: z.string().optional(),
+  bands: z
+    .string()
+    .optional()
+    .transform((v) => parseBandIds(v)),
 });
 
 router.get('/', async (req, res, next) => {

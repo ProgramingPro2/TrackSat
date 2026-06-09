@@ -1,15 +1,35 @@
 import type { ObserverLocation, SatellitePass, UpcomingPass } from '../types';
 import type { SatRec } from 'satellite.js';
-import { computeLookAngles } from './propagation';
+import { computeLookAngles, isStationarySatellite } from './propagation';
 import type { SatelliteRecord } from './propagation';
 
 const DEFAULT_MIN_ELEVATION_DEG = 10;
-const STEP_SECONDS = 30;
+const FINE_STEP_SECONDS = 30;
+const COARSE_STEP_SECONDS = 180;
+const IN_PASS_STEP_SECONDS = 15;
 
 export interface PredictPassesOptions {
   minElevationDeg?: number;
   maxPasses?: number;
   refine?: boolean;
+}
+
+export interface PredictPassesBatchOptions extends PredictPassesOptions {
+  maxResults?: number;
+  passesPerSatellite?: number;
+  progressInterval?: number;
+}
+
+export interface PredictPassesBatchProgress {
+  passes: UpcomingPass[];
+  processed: number;
+  total: number;
+  done: boolean;
+}
+
+function getOrbitalPeriodMs(satrec: SatRec): number {
+  const periodMinutes = (2 * Math.PI) / satrec.no;
+  return periodMinutes * 60 * 1000;
 }
 
 function getElevation(
@@ -18,6 +38,26 @@ function getElevation(
   date: Date,
 ): number {
   return computeLookAngles(satrec, observer, date)?.elevation ?? -90;
+}
+
+function stepSecondsForElevation(
+  elevation: number,
+  minElevationDeg: number,
+  inPass: boolean,
+  orbitalPeriodMs: number,
+): number {
+  if (inPass) return IN_PASS_STEP_SECONDS;
+
+  const margin = elevation - minElevationDeg;
+  if (margin < -20) {
+    const coarse = Math.max(
+      COARSE_STEP_SECONDS,
+      Math.floor((orbitalPeriodMs / 1000) * 0.12),
+    );
+    return Math.min(coarse, 600);
+  }
+  if (margin < -5) return 60;
+  return FINE_STEP_SECONDS;
 }
 
 function refineCrossingTime(
@@ -54,13 +94,13 @@ function refinePass(
   pass: SatellitePass,
   minElevationDeg: number,
 ): SatellitePass {
-  const coarseAos = new Date(pass.aos.getTime() - STEP_SECONDS * 1000);
+  const coarseAos = new Date(pass.aos.getTime() - FINE_STEP_SECONDS * 1000);
   const aos = refineCrossingTime(satrec, observer, coarseAos, pass.aos, minElevationDeg, true);
   const los = refineCrossingTime(
     satrec,
     observer,
     pass.los,
-    new Date(pass.los.getTime() + STEP_SECONDS * 1000),
+    new Date(pass.los.getTime() + FINE_STEP_SECONDS * 1000),
     minElevationDeg,
     false,
   );
@@ -98,6 +138,14 @@ function refinePass(
   };
 }
 
+function sortAndTrimPasses(
+  passes: UpcomingPass[],
+  maxResults: number,
+): UpcomingPass[] {
+  passes.sort((a, b) => a.aos.getTime() - b.aos.getTime());
+  return passes.slice(0, maxResults);
+}
+
 export function predictPasses(
   satrec: SatRec,
   observer: ObserverLocation,
@@ -110,7 +158,8 @@ export function predictPasses(
   const refine = options.refine ?? false;
   const passes: SatellitePass[] = [];
   const endTime = start.getTime() + days * 24 * 60 * 60 * 1000;
-  let cursor = new Date(start);
+  const orbitalPeriodMs = getOrbitalPeriodMs(satrec);
+  let cursor = start.getTime();
   let inPass = false;
   let passStart: Date | null = null;
   let maxEl = -90;
@@ -118,13 +167,14 @@ export function predictPasses(
   let aosAz = 0;
   let losAz = 0;
 
-  while (cursor.getTime() < endTime && passes.length < maxPasses) {
-    const look = computeLookAngles(satrec, observer, cursor);
+  while (cursor < endTime && passes.length < maxPasses) {
+    const date = new Date(cursor);
+    const look = computeLookAngles(satrec, observer, date);
     const elevation = look?.elevation ?? -90;
 
     if (!inPass && elevation >= minElevationDeg) {
       inPass = true;
-      passStart = new Date(cursor);
+      passStart = date;
       maxEl = elevation;
       maxElAz = look?.azimuth ?? 0;
       aosAz = look?.azimuth ?? 0;
@@ -136,7 +186,7 @@ export function predictPasses(
     } else if (inPass && elevation < minElevationDeg) {
       if (passStart) {
         const aos = passStart;
-        const los = new Date(cursor);
+        const los = date;
         const pass: SatellitePass = {
           aos,
           los,
@@ -151,17 +201,36 @@ export function predictPasses(
       inPass = false;
       passStart = null;
       maxEl = -90;
+
+      const jumpMs = Math.max(orbitalPeriodMs * 0.45, FINE_STEP_SECONDS * 1000);
+      cursor = Math.min(endTime, cursor + jumpMs);
+      continue;
     }
 
-    cursor = new Date(cursor.getTime() + STEP_SECONDS * 1000);
+    const stepSeconds = stepSecondsForElevation(
+      elevation,
+      minElevationDeg,
+      inPass,
+      orbitalPeriodMs,
+    );
+    cursor += stepSeconds * 1000;
   }
 
   return passes;
 }
 
-export interface PredictPassesBatchOptions extends PredictPassesOptions {
-  maxResults?: number;
-  passesPerSatellite?: number;
+function refineUpcomingPasses(
+  recordsById: Map<string, SatRec>,
+  observer: ObserverLocation,
+  passes: UpcomingPass[],
+  minElevationDeg: number,
+): UpcomingPass[] {
+  return passes.map((pass) => {
+    const satrec = recordsById.get(pass.noradId);
+    if (!satrec) return pass;
+    const refined = refinePass(satrec, observer, pass, minElevationDeg);
+    return { noradId: pass.noradId, ...refined };
+  });
 }
 
 export function predictPassesBatch(
@@ -170,25 +239,53 @@ export function predictPassesBatch(
   start: Date,
   hours: number,
   options: PredictPassesBatchOptions = {},
+  onProgress?: (progress: PredictPassesBatchProgress) => void,
 ): UpcomingPass[] {
   const minElevationDeg = options.minElevationDeg ?? DEFAULT_MIN_ELEVATION_DEG;
   const maxResults = options.maxResults ?? 50;
   const passesPerSatellite = options.passesPerSatellite ?? 2;
+  const progressInterval = options.progressInterval ?? 5;
   const days = hours / 24;
   const allPasses: UpcomingPass[] = [];
+  const recordsById = new Map(records.map(({ noradId, satrec }) => [noradId, satrec]));
+  const total = records.length;
 
-  for (const { noradId, satrec } of records) {
+  const emitProgress = (processed: number, done: boolean, passesOverride?: UpcomingPass[]) => {
+    onProgress?.({
+      passes: passesOverride ?? sortAndTrimPasses([...allPasses], maxResults),
+      processed,
+      total,
+      done,
+    });
+  };
+
+  for (let index = 0; index < records.length; index++) {
+    const { noradId, satrec } = records[index];
+
+    if (isStationarySatellite(satrec, start)) {
+      if ((index + 1) % progressInterval === 0 || index + 1 === total) {
+        emitProgress(index + 1, false);
+      }
+      continue;
+    }
+
     const passes = predictPasses(satrec, observer, start, days, passesPerSatellite, {
       minElevationDeg,
-      refine: options.refine ?? true,
+      refine: false,
     });
 
     for (const pass of passes) {
       if (pass.los.getTime() <= start.getTime()) continue;
       allPasses.push({ noradId, ...pass });
     }
+
+    if ((index + 1) % progressInterval === 0 || index + 1 === total) {
+      emitProgress(index + 1, false);
+    }
   }
 
-  allPasses.sort((a, b) => a.aos.getTime() - b.aos.getTime());
-  return allPasses.slice(0, maxResults);
+  const topPasses = sortAndTrimPasses(allPasses, maxResults);
+  const refinedPasses = refineUpcomingPasses(recordsById, observer, topPasses, minElevationDeg);
+  emitProgress(total, true, refinedPasses);
+  return refinedPasses;
 }

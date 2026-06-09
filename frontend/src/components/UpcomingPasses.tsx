@@ -5,16 +5,49 @@ interface UpcomingPassesProps {
   passes: UpcomingPass[];
   satellites: SatelliteSummary[];
   computing?: boolean;
+  progress?: { processed: number; total: number } | null;
   error?: string | null;
   now?: Date;
   onSelect?: (noradId: string) => void;
   selectedNoradId?: string | null;
 }
 
+function ScanProgressBar({
+  progress,
+  label,
+}: {
+  progress: { processed: number; total: number };
+  label?: string;
+}) {
+  const pct = Math.min(100, Math.round((progress.processed / progress.total) * 100));
+
+  return (
+    <div className="space-y-1">
+      <div
+        className="h-1 w-full overflow-hidden rounded-full bg-slate-800"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Pass scan progress"
+      >
+        <div
+          className="h-full rounded-full bg-sky-500 transition-[width] duration-300 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="text-[11px] text-slate-500">
+        {label ?? `Scanning satellites (${progress.processed}/${progress.total})`}
+      </p>
+    </div>
+  );
+}
+
 export function UpcomingPasses({
   passes,
   satellites,
   computing,
+  progress,
   error,
   now = new Date(),
   onSelect,
@@ -23,7 +56,12 @@ export function UpcomingPasses({
   const nameMap = new Map(satellites.map((s) => [s.noradId, s.name]));
 
   if (computing && passes.length === 0) {
-    return <p className="text-xs text-slate-400">Computing upcoming passes...</p>;
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-slate-400">Computing upcoming passes...</p>
+        {progress && progress.total > 0 && <ScanProgressBar progress={progress} />}
+      </div>
+    );
   }
 
   if (error) {
@@ -41,7 +79,13 @@ export function UpcomingPasses({
   return (
     <div className="overflow-x-auto">
       {computing && (
-        <p className="mb-1 text-[11px] text-slate-500">Refreshing pass schedule...</p>
+        <div className="mb-2">
+          {progress && progress.total > 0 ? (
+            <ScanProgressBar progress={progress} />
+          ) : (
+            <p className="text-[11px] text-slate-500">Refreshing pass schedule...</p>
+          )}
+        </div>
       )}
       <table className="w-full text-left text-xs">
         <thead>

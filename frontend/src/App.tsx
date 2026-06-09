@@ -5,7 +5,8 @@ import { useObserver } from './hooks/useObserver';
 import { SatList } from './components/SatList';
 import { DetailPanel } from './components/DetailPanel';
 import { SkyView } from './components/SkyView';
-import type { AppPage, FilterState, ViewMode } from './types';
+import { HAM_FREQUENCY_BANDS } from './utils/frequencyBands';
+import type { AppPage, FilterState, FrequencyBandId, ViewMode } from './types';
 
 const Map2D = lazy(() => import('./components/Map2D').then((m) => ({ default: m.Map2D })));
 const Globe3D = lazy(() => import('./components/Globe3D').then((m) => ({ default: m.Globe3D })));
@@ -16,7 +17,17 @@ function App() {
     search: '',
     group: '',
     hasRadioOnly: false,
+    bands: [],
   });
+
+  const toggleBand = (bandId: FrequencyBandId) => {
+    setFilters((current) => ({
+      ...current,
+      bands: current.bands.includes(bandId)
+        ? current.bands.filter((id) => id !== bandId)
+        : [...current.bands, bandId],
+    }));
+  };
   const [selectedNoradId, setSelectedNoradId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('map2d');
   const [showList, setShowList] = useState(true);
@@ -139,6 +150,26 @@ function App() {
           <span className="sm:hidden">Radio</span>
           <span className="hidden sm:inline">Radio only</span>
         </label>
+        <div className="flex shrink-0 items-center gap-1">
+          {HAM_FREQUENCY_BANDS.map((band) => {
+            const active = filters.bands.includes(band.id);
+            return (
+              <button
+                key={band.id}
+                type="button"
+                title={band.label}
+                aria-pressed={active}
+                onClick={() => toggleBand(band.id)}
+                className={`rounded px-2 py-1 text-xs sm:rounded-md sm:px-3 sm:py-1.5 sm:text-sm ${
+                  active ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span className="sm:hidden">{band.shortLabel}</span>
+                <span className="hidden sm:inline">{band.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-800 px-2 py-1.5 text-[11px] text-slate-400 sm:gap-2 sm:px-4 sm:py-2 sm:text-xs">

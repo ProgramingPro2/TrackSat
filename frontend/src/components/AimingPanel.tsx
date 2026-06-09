@@ -4,6 +4,7 @@ import { computeLookAngles } from '../services/propagation';
 import { computePassTrack, computeRangeRate } from '../services/observation';
 import type { SatelliteRecord } from '../services/propagation';
 import { azimuthToCompass, formatCountdown, formatRangeRate } from '../utils/format';
+import { colorForNoradId } from '../utils/satelliteColors';
 import { SkyPlot } from './SkyPlot';
 
 interface AimingPanelProps {
@@ -113,10 +114,22 @@ export function AimingPanel({
                 label: satelliteName,
                 azimuth: look.azimuth,
                 elevation: Math.max(look.elevation, 0),
+                color: colorForNoradId(noradId),
                 selected: true,
               },
             ]}
-            track={passTrack}
+            tracks={
+              passTrack.length > 1
+                ? [
+                    {
+                      noradId,
+                      color: colorForNoradId(noradId),
+                      points: passTrack,
+                      selected: true,
+                    },
+                  ]
+                : []
+            }
             currentPoint={
               aboveHorizon ? { azimuth: look.azimuth, elevation: look.elevation } : undefined
             }

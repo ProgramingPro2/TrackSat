@@ -9,6 +9,11 @@ export interface UseUpcomingPassesOptions {
   refreshIntervalMs?: number;
 }
 
+export interface PassComputationProgress {
+  processed: number;
+  total: number;
+}
+
 function deserializePasses(
   passes: NonNullable<PassWorkerResponse['passes']>,
 ): UpcomingPass[] {
@@ -38,18 +43,13 @@ export function useUpcomingPasses(
 
   const [passes, setPasses] = useState<UpcomingPass[]>([]);
   const [computing, setComputing] = useState(false);
+  const [progress, setProgress] = useState<PassComputationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const requestIdRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const compute = useCallback(() => {
-    if (satellites.length === 0) {
-      setPasses([]);
-      setComputing(false);
-      return;
-    }
-
+  useEffect(() => {
     if (!workerRef.current) {
       workerRef.current = new Worker(new URL('../services/passWorker.ts', import.meta.url), {
         type: 'module',
@@ -57,25 +57,51 @@ export function useUpcomingPasses(
     }
 
     const worker = workerRef.current;
-    const requestId = ++requestIdRef.current;
-    setComputing(true);
-    setError(null);
 
     const handleMessage = (event: MessageEvent<PassWorkerResponse>) => {
-      if (event.data.requestId !== requestId) return;
-      worker.removeEventListener('message', handleMessage);
+      if (event.data.requestId !== requestIdRef.current) return;
 
       if (event.data.type === 'error') {
         setError(event.data.error ?? 'Pass computation failed');
         setComputing(false);
+        setProgress(null);
         return;
       }
 
       setPasses(deserializePasses(event.data.passes ?? []));
-      setComputing(false);
+
+      if (event.data.processed !== undefined && event.data.total !== undefined) {
+        setProgress({ processed: event.data.processed, total: event.data.total });
+      }
+
+      if (event.data.type === 'result') {
+        setComputing(false);
+        setProgress(null);
+      }
     };
 
     worker.addEventListener('message', handleMessage);
+
+    return () => {
+      worker.removeEventListener('message', handleMessage);
+    };
+  }, []);
+
+  const compute = useCallback(() => {
+    if (satellites.length === 0) {
+      setPasses([]);
+      setComputing(false);
+      setProgress(null);
+      return;
+    }
+
+    const worker = workerRef.current;
+    if (!worker) return;
+
+    const requestId = ++requestIdRef.current;
+    setComputing(true);
+    setError(null);
+    setProgress(null);
 
     const request: PassWorkerRequest = {
       type: 'compute',
@@ -111,5 +137,5 @@ export function useUpcomingPasses(
     };
   }, []);
 
-  return { passes, computing, error, refresh: compute };
+  return { passes, computing, progress, error, refresh: compute };
 }

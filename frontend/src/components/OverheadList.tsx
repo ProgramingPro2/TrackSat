@@ -1,5 +1,6 @@
 import type { OverheadSatellite, SatelliteSummary } from '../types';
 import { azimuthToCompass } from '../utils/format';
+import { colorForNoradId } from '../utils/satelliteColors';
 
 interface OverheadListProps {
   overhead: OverheadSatellite[];
@@ -48,7 +49,13 @@ export function OverheadList({
                 onClick={() => onSelect(sat.noradId)}
               >
                 <td className="max-w-[120px] truncate py-1 pr-1.5">
-                  <p className="truncate font-medium text-slate-100">{name}</p>
+                  <p className="flex items-center gap-1.5 truncate font-medium text-slate-100">
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: colorForNoradId(sat.noradId) }}
+                    />
+                    {name}
+                  </p>
                 </td>
                 <td className="whitespace-nowrap py-1 pr-1.5 font-mono text-[11px]">
                   {sat.azimuth.toFixed(0)}&deg; {azimuthToCompass(sat.azimuth)}

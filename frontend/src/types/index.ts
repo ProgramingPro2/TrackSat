@@ -91,8 +91,11 @@ export interface UpcomingPass extends SatellitePass {
 export type ViewMode = 'map2d' | 'globe3d';
 export type AppPage = 'tracker' | 'sky';
 
+export type FrequencyBandId = 'vhf' | 'uhf';
+
 export interface FilterState {
   search: string;
   group: string;
   hasRadioOnly: boolean;
+  bands: FrequencyBandId[];
 }

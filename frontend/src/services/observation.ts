@@ -58,3 +58,20 @@ export function computePassTrack(
 
   return track;
 }
+
+export function computeVisibleSkyTrack(
+  satrec: SatRec,
+  observer: ObserverLocation,
+  now: Date,
+  pastMinutes = 30,
+  futureMinutes = 30,
+  stepSeconds = 20,
+): Array<{ azimuth: number; elevation: number }> {
+  return computePassTrack(
+    satrec,
+    observer,
+    new Date(now.getTime() - pastMinutes * 60 * 1000),
+    new Date(now.getTime() + futureMinutes * 60 * 1000),
+    stepSeconds,
+  );
+}

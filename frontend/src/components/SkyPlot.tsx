@@ -1,10 +1,12 @@
 import type { OverheadSatellite } from '../types';
+import { colorForNoradId } from '../utils/satelliteColors';
 
 export interface SkyPlotPoint {
   noradId: string;
   label?: string;
   azimuth: number;
   elevation: number;
+  color?: string;
   selected?: boolean;
 }
 
@@ -13,8 +15,16 @@ export interface SkyPlotTrackPoint {
   elevation: number;
 }
 
+export interface SkyPlotSatelliteTrack {
+  noradId: string;
+  color: string;
+  points: SkyPlotTrackPoint[];
+  selected?: boolean;
+}
+
 interface SkyPlotProps {
   points: SkyPlotPoint[];
+  tracks?: SkyPlotSatelliteTrack[];
   track?: SkyPlotTrackPoint[];
   currentPoint?: SkyPlotTrackPoint;
   size?: number;
@@ -37,8 +47,23 @@ function polarToSvg(
   };
 }
 
+function trackToPolyline(
+  track: SkyPlotTrackPoint[],
+  cx: number,
+  cy: number,
+  radius: number,
+): string {
+  return track
+    .map((p) => {
+      const { x, y } = polarToSvg(p.azimuth, p.elevation, cx, cy, radius);
+      return `${x},${y}`;
+    })
+    .join(' ');
+}
+
 export function SkyPlot({
   points,
+  tracks = [],
   track = [],
   currentPoint,
   size = 240,
@@ -117,14 +142,22 @@ export function SkyPlot({
         );
       })}
 
+      {tracks.map(({ noradId, color, points: trackPoints, selected }) =>
+        trackPoints.length > 1 ? (
+          <polyline
+            key={`track-${noradId}`}
+            points={trackToPolyline(trackPoints, cx, cy, radius)}
+            fill="none"
+            stroke={color}
+            strokeWidth={selected ? 2 : 1.5}
+            strokeOpacity={selected ? 0.9 : 0.55}
+          />
+        ) : null,
+      )}
+
       {track.length > 1 && (
         <polyline
-          points={track
-            .map((p) => {
-              const { x, y } = polarToSvg(p.azimuth, p.elevation, cx, cy, radius);
-              return `${x},${y}`;
-            })
-            .join(' ')}
+          points={trackToPolyline(track, cx, cy, radius)}
           fill="none"
           stroke="#38bdf8"
           strokeWidth={2}
@@ -145,7 +178,8 @@ export function SkyPlot({
 
       {points.map((point) => {
         const { x, y } = polarToSvg(point.azimuth, point.elevation, cx, cy, radius);
-        const fill = point.selected ? '#38bdf8' : '#22c55e';
+        const fill = point.color ?? (point.selected ? '#38bdf8' : '#22c55e');
+        const stroke = point.selected ? '#fff' : 'rgba(15,23,42,0.8)';
         return (
           <g key={point.noradId}>
             <circle
@@ -153,7 +187,7 @@ export function SkyPlot({
               cy={y}
               r={point.selected ? 5 : 4}
               fill={fill}
-              stroke={point.selected ? '#bae6fd' : '#14532d'}
+              stroke={stroke}
               strokeWidth={point.selected ? 1.5 : 1}
               className={onSelect ? 'cursor-pointer' : undefined}
               onClick={() => onSelect?.(point.noradId)}
@@ -188,6 +222,7 @@ export function overheadToSkyPoints(
     label: nameMap.get(sat.noradId),
     azimuth: sat.azimuth,
     elevation: sat.elevation,
+    color: colorForNoradId(sat.noradId),
     selected: sat.noradId === selectedNoradId,
   }));
 }

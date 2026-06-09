@@ -1,10 +1,10 @@
 import { MapContainer, TileLayer, Circle, Polyline, Marker, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { ObserverLocation, PropagatedPosition, SatelliteSummary } from '../types';
 import {
+  computeGroundTrack,
   computeLookAngles,
-  computeOrbitTrack,
   estimateFootprintRadiusKm,
   isStationarySatellite,
   isValidCoordinate,
@@ -22,13 +22,6 @@ interface Map2DProps {
   now: Date;
 }
 
-interface SatelliteTrack {
-  noradId: string;
-  color: string;
-  track: Array<[number, number]>;
-  stationary: boolean;
-}
-
 function MapResizer() {
   const map = useMap();
   useEffect(() => {
@@ -36,37 +29,6 @@ function MapResizer() {
     return () => clearTimeout(timer);
   }, [map]);
   return null;
-}
-
-function FlyToSelected({
-  selectedNoradId,
-  positionMap,
-}: {
-  selectedNoradId: string | null;
-  positionMap: Map<string, PropagatedPosition>;
-}) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!selectedNoradId) return;
-    const pos = positionMap.get(selectedNoradId);
-    if (pos && isValidCoordinate(pos.latitude, pos.longitude)) {
-      map.flyTo([pos.latitude, pos.longitude], Math.max(map.getZoom(), 3), { duration: 0.8 });
-    }
-  }, [selectedNoradId, positionMap, map]);
-
-  return null;
-}
-
-function createSatelliteIcon(color: string, selected: boolean): L.DivIcon {
-  const size = selected ? 12 : 8;
-  const border = selected ? 2 : 1.5;
-  return L.divIcon({
-    className: '',
-    html: `<div style="background:${color};border:${border}px solid #fff;border-radius:50%;width:${size}px;height:${size}px;box-shadow:0 0 0 ${selected ? 2 : 1}px rgba(255,255,255,0.35);"></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  });
 }
 
 export function Map2D({
@@ -78,14 +40,13 @@ export function Map2D({
   observer,
   now,
 }: Map2DProps) {
-  const iconCacheRef = useRef(new Map<string, L.DivIcon>());
-
   const positionMap = useMemo(() => {
     const map = new Map<string, PropagatedPosition>();
     for (const pos of positions) map.set(pos.noradId, pos);
     return map;
   }, [positions]);
 
+  const selectedRecord = selectedNoradId ? getRecord(selectedNoradId) : undefined;
   const selectedPos = selectedNoradId ? positionMap.get(selectedNoradId) : undefined;
 
   const validPositions = useMemo(
@@ -93,61 +54,47 @@ export function Map2D({
     [positions],
   );
 
-  const trackTimeBucket = Math.floor(now.getTime() / 60_000);
+  const selectedGroundTrack = useMemo(() => {
+    if (!selectedRecord || isStationarySatellite(selectedRecord.satrec, now)) return [];
+    const past = computeGroundTrack(
+      selectedRecord.satrec,
+      new Date(now.getTime() - 45 * 60000),
+      45,
+      60,
+    );
+    const future = computeGroundTrack(selectedRecord.satrec, now, 45, 60);
+    return [...past, ...future].filter(([lat, lng]) => isValidCoordinate(lat, lng));
+  }, [selectedRecord, now]);
 
-  const satelliteTracks = useMemo((): SatelliteTrack[] => {
-    const trackDate = new Date(trackTimeBucket * 60_000);
-    const tracks: SatelliteTrack[] = [];
-
-    for (const pos of validPositions) {
-      const record = getRecord(pos.noradId);
-      if (!record) continue;
-
-      const color = colorForNoradId(pos.noradId);
-      const stationary = isStationarySatellite(record.satrec, trackDate);
-      const isSelected = pos.noradId === selectedNoradId;
-      const stepSeconds = isSelected ? 60 : 120;
-
-      tracks.push({
-        noradId: pos.noradId,
-        color,
-        stationary,
-        track: stationary
-          ? []
-          : computeOrbitTrack(record.satrec, trackDate, 45, 45, stepSeconds),
-      });
-    }
-
-    return tracks;
-  }, [validPositions, getRecord, trackTimeBucket, selectedNoradId]);
+  const selectedColor = selectedNoradId ? colorForNoradId(selectedNoradId) : '#fbbf24';
 
   const azimuthLine = useMemo(() => {
-    if (!selectedNoradId || !selectedPos) return [];
-    const record = getRecord(selectedNoradId);
-    if (!record) return [];
+    if (!selectedRecord || !selectedPos) return [];
     if (!isValidCoordinate(observer.latitude, observer.longitude)) return [];
     if (!isValidCoordinate(selectedPos.latitude, selectedPos.longitude)) return [];
 
-    const look = computeLookAngles(record.satrec, observer, now);
+    const look = computeLookAngles(selectedRecord.satrec, observer, now);
     if (!look || look.elevation < 0) return [];
 
     return [
       [observer.latitude, observer.longitude] as [number, number],
       [selectedPos.latitude, selectedPos.longitude] as [number, number],
     ];
-  }, [selectedNoradId, selectedPos, getRecord, observer, now]);
+  }, [selectedRecord, selectedPos, observer, now]);
 
-  const getIcon = (noradId: string, selected: boolean): L.DivIcon => {
-    const color = colorForNoradId(noradId);
-    const key = `${noradId}-${selected ? 'sel' : 'norm'}`;
-    const cache = iconCacheRef.current;
-    const cached = cache.get(key);
-    if (cached) return cached;
+  const icon = L.divIcon({
+    className: '',
+    html: '<div class="sat-marker"></div>',
+    iconSize: [10, 10],
+    iconAnchor: [5, 5],
+  });
 
-    const icon = createSatelliteIcon(color, selected);
-    cache.set(key, icon);
-    return icon;
-  };
+  const selectedIcon = L.divIcon({
+    className: '',
+    html: `<div style="background:${selectedColor};border:2px solid #fff;border-radius:50%;width:14px;height:14px;box-shadow:0 0 0 2px rgba(255,255,255,0.35);"></div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
 
   const observerIcon = L.divIcon({
     className: '',
@@ -169,21 +116,6 @@ export function Map2D({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <MapResizer />
-      <FlyToSelected selectedNoradId={selectedNoradId} positionMap={positionMap} />
-
-      {satelliteTracks.map(({ noradId, color, track }) =>
-        track.length > 1 ? (
-          <Polyline
-            key={`track-${noradId}`}
-            positions={track}
-            pathOptions={{
-              color,
-              weight: noradId === selectedNoradId ? 2.5 : 1.5,
-              opacity: noradId === selectedNoradId ? 0.95 : 0.55,
-            }}
-          />
-        ) : null,
-      )}
 
       {isValidCoordinate(observer.latitude, observer.longitude) && (
         <Marker
@@ -201,7 +133,7 @@ export function Map2D({
           <Marker
             key={pos.noradId}
             position={[pos.latitude, pos.longitude]}
-            icon={getIcon(pos.noradId, isSelected)}
+            icon={isSelected ? selectedIcon : icon}
             zIndexOffset={isSelected ? 500 : 0}
             eventHandlers={{ click: () => onSelect(pos.noradId) }}
           />
@@ -213,11 +145,18 @@ export function Map2D({
           center={[selectedPos.latitude, selectedPos.longitude]}
           radius={estimateFootprintRadiusKm(selectedPos.altitudeKm) * 1000}
           pathOptions={{
-            color: colorForNoradId(selectedNoradId ?? ''),
-            fillColor: colorForNoradId(selectedNoradId ?? ''),
+            color: selectedColor,
+            fillColor: selectedColor,
             fillOpacity: 0.08,
             weight: 1,
           }}
+        />
+      )}
+
+      {selectedGroundTrack.length > 1 && (
+        <Polyline
+          positions={selectedGroundTrack}
+          pathOptions={{ color: selectedColor, weight: 2, opacity: 0.85 }}
         />
       )}
 
