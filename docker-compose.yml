@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - '38471:38471'
+    environment:
+      - PORT=38471
+      - NODE_ENV=production
+      - CORS_ORIGIN=http://localhost:38472
+      - CELESTRAK_GROUPS=amateur,weather,cubesat,stations,active
+    volumes:
+      - backend-data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - '38472:80'
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:
